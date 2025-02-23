@@ -2,42 +2,40 @@ source,relation,target,details
 Crimson Viper Group,HAS_EMAIL,johnsmith@gmail.com,Primary Contact Email
 Wolf Syndicate,HAS_EMAIL,yourmom@yahoo.com,Primary Contact Email
 Falcon Systems Inc.,HAS_EMAIL,jimmyyo@yahoo.com,Public Relations Email
-Global Tech Solutions,IS_REGISTERED_AS,Technology reseller,
-Global Tech Solutions,HAS_EMAIL,info@aqua-terra.fake,Corporate Email
-John ?Specter? Whiting,HAS_EMAIL,carl.james63@example.com,Sales/Inquiry Email
-John ?Specter? Whiting,IS_ASSOCIATED_WITH,Crimson Viper,
-Maria Gomez,HAS_EMAIL,zoe.kelly07@samplemail.net,Personal Alias Email
-Maria Gomez,IS_ASSOCIATED_WITH,Wolf Syndicate,
-Maria Gomez,HAS_EMAIL,ryan.hicks24@fakemail.org,Personal/Business Email
-John ?Specter? Whiting,HAS_IP,185.23.76.19,Known IP Usage
+Global Tech Solutions,HAS_EMAIL,info@aqua-terra.fake,
+Global Tech Solutions,IS_REGISTERED_AS,technology reseller,possibly a shell company funneling funds into illicit weapon projects
+John ?Specter? Whiting,HAS_EMAIL,carl.james63@example.com,
+John ?Specter? Whiting,IS_ASSOCIATED_WITH,Crimson Viper,suspected top-level operative within Crimson Viper
+Maria Gomez,HAS_EMAIL,zoe.kelly07@samplemail.net,
+Maria Gomez,IS_ASSOCIATED_WITH,Wolf Syndicate,financial liaison known to manage cross-border transactions for Wolf Syndicate
+Maria Gomez,HAS_EMAIL,ryan.hicks24@fakemail.org,
+John ?Specter? Whiting,HAS_IP,185.23.76.19,
 iple onshore accounts,HAS_EMAIL,email@example.com,
-iple onshore accounts,IS_ASSOCIATED_WITH,+44 7890 123456 (UK phone number used for WhatsApp),
+iple onshore accounts,HAS_IP,185.23.76.19,
 Falcon Systems Inc.,HAS_WEBSITE,http://www.falcon-sys.fake,
 Falcon Systems Inc.,HAS_EMAIL,XXX@bad.com,
 Aqua Terra Manufacturing,HAS_EMAIL,info@aqua-terra.fake,
 Global Tech Solutions,HAS_WEBSITE,http://www.globaltech.fake,
 Global Tech Solutions,HAS_EMAIL,scamman@yahoo.com,
-John ?Specter? Whiting,HAS_IP,185.23.76.19,
 John ?Specter? Whiting,HAS_EMAIL,millertime@gmail.com,
-Crimson Viper Group,HAS_IP,45.71.198.12,
-Crimson Viper Group,HAS_EMAIL,internetstorm@gmail.com,Command & control server suspected
-Wolf Syndicate,HAS_IP,202.57.63.110,
+Crimson Viper Group,HAS_IP,45.71.198.12,Command & control server suspected
+Crimson Viper Group,HAS_EMAIL,internetstorm@gmail.com,"Primary for secure comms, hosting unknown forum"
+Wolf Syndicate,HAS_IP,202.57.63.110,Used for logistical planning in East Asia
 Wolf Syndicate,HAS_EMAIL,millertime@yahoo.com,Used for logistical planning in East Asia
-Maria Gomez,HAS_IP,81.91.143.7,
+Maria Gomez,HAS_IP,81.91.143.7,Detected in financial transaction traces
 Maria Gomez,HAS_EMAIL,budlightyum@yahoo.com,Detected in financial transaction traces
-Global Tech Solutions,HAS_IP,2a00:1450:400a:801::200e,
+Global Tech Solutions,HAS_IP,2a00:1450:400a:801::200e,Possibly used for large file transfers
 Global Tech Solutions,HAS_EMAIL,cryptoman@yahoo.com,Possibly used for large file transfers
-Crimson Viper Group,IS_ASSOCIATED_WITH,Coastal Finances,Large transfers for 'Equipment'
-Wolf Syndicate,IS_ASSOCIATED_WITH,NewLondon Bank,Suspected arms procurement channel
-Maria Gomez,IS_ASSOCIATED_WITH,Banco de Bogot�,Frequent cross-border transactions
-Falcon Systems Inc.,IS_ASSOCIATED_WITH,Texas Federal Bank,Official corporate account
-Global Tech Solutions,IS_ASSOCIATED_WITH,EuroOne Finance,Shell account with minimal activity
+Crimson Viper Group,IS_REGISTERED_AS,Coastal Finances,Large transfers for 'Equipment'
+Wolf Syndicate,IS_REGISTERED_AS,NewLondon Bank,Suspected arms procurement channel
+Maria Gomez,IS_REGISTERED_AS,Banco de Bogot�,Frequent cross-border transactions
+Falcon Systems Inc.,IS_REGISTERED_AS,Texas Federal Bank,Official corporate account
+Global Tech Solutions,IS_REGISTERED_AS,EuroOne Finance,Shell account with minimal activity
 Crimson Viper Group,IS_ASSOCIATED_WITH,Wolf Syndicate,Cooperation with Wolf Syndicate further broadens their logistics and financial reach.
-Crimson Viper Group,HAS_IP,Multiple IP addresses,
-Crimson Viper Group,HAS_EMAIL,Multiple email addresses,
-Crimson Viper Group,IS_REGISTERED_AS,Shell companies,
-Shell companies,IS_ASSOCIATED_WITH,Crimson Viper Group,
-Crimson Viper,HAS_IP,IP addresses,
-Crimson Viper,HAS_WEBSITE,domain registrations,
-Falcon Systems Inc.,IS_ASSOCIATED_WITH,shipping containers,
-Aqua Terra Manufacturing,IS_ASSOCIATED_WITH,shipping containers,
+Crimson Viper Group,HAS_IP,Multiple IP addresses,Multiple IP addresses identified suggest systematic efforts to obfuscate transactions.
+Crimson Viper Group,HAS_EMAIL,Multiple email addresses,Multiple email addresses identified suggest systematic efforts to obfuscate transactions.
+Crimson Viper Group,IS_REGISTERED_AS,Shell companies,The Crimson Viper Group has a network of shell companies.
+Crimson Viper,HAS_IP,IP addresses,Associated with Crimson Viper's networks
+Crimson Viper,HAS_WEBSITE,Domain registrations,Associated with Crimson Viper's networks
+Falcon Systems Inc.,IS_ASSOCIATED_WITH,Shipping containers,
+Aqua Terra Manufacturing,IS_ASSOCIATED_WITH,Shipping containers,
