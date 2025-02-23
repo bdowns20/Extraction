@@ -1,0 +1,10 @@
+streamlit
+pyvis
+networkx
+matplotlib
+pandas
+rapidfuzz
+phonenumbers
+natasha
+pdfminer.six
+openai
