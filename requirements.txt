@@ -8,3 +8,4 @@ phonenumbers
 natasha
 pdfminer.six
 openai
+setuptools
