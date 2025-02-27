@@ -9,3 +9,7 @@ natasha
 pdfminer.six
 openai
 setuptools
+textblob
+folium
+streamlit-folium
+geopy

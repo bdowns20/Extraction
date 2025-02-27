@@ -5,11 +5,15 @@ import os
 import re
 import xml.etree.ElementTree as ET
 from io import BytesIO
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+import folium
+from streamlit_folium import folium_static
+from geopy.geocoders import Nominatim
+from textblob import TextBlob
 
 # pdfminer for PDF extraction
 from pdfminer.high_level import extract_text as pdf_extract_text
@@ -37,6 +41,12 @@ from pyvis.network import Network
 AZURE_API_KEY = "9abc905da5104e8eb8d6ec3ceb27f767"  # Replace with your actual API key
 AZURE_ENDPOINT = "https://aoai.apim.mitre.org/api-key"  # Replace with your actual endpoint
 API_VERSION = "2023-03-15-preview"
+
+# Initialize geocoder
+geolocator = Nominatim(user_agent="meret-entity-extractor")
+
+# Cache for geocoding results to avoid repeated API calls
+geo_cache = {}
 
 # ---------------------------------------
 # Logging Configuration
@@ -167,6 +177,7 @@ Extract the following entities from the text below:
 - Company names
 - Person names
 - IBANs
+- Locations (cities, countries, regions)
 
 Return them as valid JSON in the format:
 {{
@@ -174,7 +185,8 @@ Return them as valid JSON in the format:
     "emails": [],
     "company_names": [],
     "person_names": [],
-    "ibans": []
+    "ibans": [],
+    "locations": []
 }}
 
 If you see no valid data for a category, leave that list empty.
@@ -196,16 +208,18 @@ Text to analyze:
     ibans = [iban for iban in entities.get("ibans", []) if is_valid_iban(iban)]
     companies = entities.get("company_names", [])
     persons = entities.get("person_names", [])
+    locations = entities.get("locations", [])
     
     combined = {
         "ip_addresses": ip_addresses,
         "emails": emails,
         "company_names": companies,
         "person_names": persons,
-        "ibans": ibans
+        "ibans": ibans,
+        "locations": locations
     }
     combined = combine_entities(combined, text_chunk)
-    logger.info(f"Extracted {len(ip_addresses)} IPs, {len(emails)} emails, and {len(persons)} person names from chunk.")
+    logger.info(f"Extracted {len(ip_addresses)} IPs, {len(emails)} emails, {len(persons)} person names, and {len(locations)} locations from chunk.")
     return combined
 
 # ---------------------------------------
@@ -229,6 +243,72 @@ def unify_substring_entities(entity_set, threshold=90):
     return set(final_list)
 
 # ---------------------------------------
+# Sentiment Analysis Functions
+# ---------------------------------------
+def analyze_entity_sentiment(entity, text_chunks):
+    """
+    Analyze sentiment for an entity across all text chunks
+    Returns a sentiment score (-1 to 1) and count of mentions
+    """
+    sentiment_sum = 0.0
+    mention_count = 0
+    
+    for chunk in text_chunks:
+        # Count occurrences in this chunk
+        if entity.lower() in chunk.lower():
+            # Find each sentence containing the entity
+            blob = TextBlob(chunk)
+            for sentence in blob.sentences:
+                if entity.lower() in sentence.string.lower():
+                    sentiment_sum += sentence.sentiment.polarity
+                    mention_count += 1
+    
+    # Calculate average sentiment if there are mentions
+    if mention_count > 0:
+        return {
+            "sentiment": sentiment_sum / mention_count,
+            "mentions": mention_count
+        }
+    else:
+        return {
+            "sentiment": 0,
+            "mentions": 0
+        }
+
+def get_entity_locations(locations):
+    """
+    Get geolocation data for location entities
+    Returns a dictionary of locations with coordinates
+    """
+    geo_results = {}
+    
+    for location in locations:
+        # Skip if already in cache
+        if location in geo_cache:
+            geo_results[location] = geo_cache[location]
+            continue
+        
+        try:
+            # Try to geocode the location
+            geo_location = geolocator.geocode(location, timeout=10)
+            if geo_location:
+                result = {
+                    "latitude": geo_location.latitude,
+                    "longitude": geo_location.longitude,
+                    "address": geo_location.address
+                }
+                # Cache the result
+                geo_cache[location] = result
+                geo_results[location] = result
+                logger.info(f"Geocoded location: {location}")
+            else:
+                logger.warning(f"Could not geocode location: {location}")
+        except Exception as e:
+            logger.error(f"Error geocoding location {location}: {e}")
+    
+    return geo_results
+
+# ---------------------------------------
 # Aggregation Pipeline for Entities
 # ---------------------------------------
 def aggregate_entities(chunks, openai_client):
@@ -237,7 +317,8 @@ def aggregate_entities(chunks, openai_client):
         "emails": set(),
         "company_names": set(),
         "person_names": set(),
-        "ibans": set()
+        "ibans": set(),
+        "locations": set()
     }
     for chunk in chunks:
         entities = extract_entities_from_chunk(chunk, openai_client)
@@ -246,8 +327,13 @@ def aggregate_entities(chunks, openai_client):
         aggregated["company_names"].update(entities.get("company_names", []))
         aggregated["person_names"].update(entities.get("person_names", []))
         aggregated["ibans"].update(entities.get("ibans", []))
+        aggregated["locations"].update(entities.get("locations", []))
+    
+    # Apply deduplication
     aggregated["company_names"] = unify_substring_entities(aggregated["company_names"])
     aggregated["person_names"] = unify_substring_entities(aggregated["person_names"])
+    aggregated["locations"] = unify_substring_entities(aggregated["locations"])
+    
     return {k: sorted(list(v)) for k, v in aggregated.items()}
 
 # ---------------------------------------
@@ -259,7 +345,8 @@ def aggregate_entities_with_counts(chunks, openai_client):
         "emails": Counter(),
         "company_names": Counter(),
         "person_names": Counter(),
-        "ibans": Counter()
+        "ibans": Counter(),
+        "locations": Counter()
     }
     for chunk in chunks:
         entities = extract_entities_from_chunk(chunk, openai_client)
@@ -401,7 +488,7 @@ def save_entities_to_csv(entities, csv_file_path):
             writer.writerow(["entity_type", "value"])
             for entity_type, values in entities.items():
                 for val in values:
-                    val_fixed = val.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
+                    val_fixed = str(val).encode('utf-8', errors='replace').decode('utf-8', errors='replace')
                     writer.writerow([entity_type, val_fixed])
         logger.info(f"Entities saved to {csv_file_path}")
     except Exception as e:
@@ -423,10 +510,10 @@ def save_relationships_to_csv(relationships, csv_file_path):
                 details = rel.get("details", "")
                 pdf_id = rel.get("pdf_id", "")
                 
-                source_fixed = source.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
-                relation_fixed = relation.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
-                target_fixed = target.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
-                details_fixed = details.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
+                source_fixed = str(source).encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+                relation_fixed = str(relation).encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+                target_fixed = str(target).encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+                details_fixed = str(details).encode('utf-8', errors='replace').decode('utf-8', errors='replace')
                 
                 writer.writerow([source_fixed, relation_fixed, target_fixed, details_fixed, pdf_id])
         logger.info(f"Relationships saved to {csv_file_path}")
@@ -470,24 +557,6 @@ def visualize_top_entities(aggregated_counts, top_n=10):
             st.bar_chart(df.set_index("Entity"))
         else:
             st.write(f"### {cat} - No data")
-
-# ---------------------------------------
-# Aggregation Pipeline with Frequency Counts
-# ---------------------------------------
-def aggregate_entities_with_counts(chunks, openai_client):
-    freq = {
-        "ip_addresses": Counter(),
-        "emails": Counter(),
-        "company_names": Counter(),
-        "person_names": Counter(),
-        "ibans": Counter()
-    }
-    for chunk in chunks:
-        entities = extract_entities_from_chunk(chunk, openai_client)
-        for cat in freq.keys():
-            for item in entities.get(cat, []):
-                freq[cat][item] += 1
-    return {cat: freq[cat].most_common() for cat in freq}
 
 # ---------------------------------------
 # Main Pipeline for Extraction
@@ -535,7 +604,8 @@ def export_to_analyst_notebook(entities, relationships, file_path="analyst_noteb
                 "company_names": "ET_ORGANIZATION",
                 "ip_addresses": "ET_NETWORK_IPV4_ADDRESS",
                 "emails": "ET_EMAIL_ADDRESS",
-                "ibans": "ET_BANK_ACCOUNT"
+                "ibans": "ET_BANK_ACCOUNT",
+                "locations": "ET_LOCATION"
             }.get(entity_type, "ET_THING")
             
             for value in values:
@@ -606,15 +676,121 @@ def export_to_analyst_notebook(entities, relationships, file_path="analyst_noteb
 # Main App (Streamlit)
 # ---------------------------------------
 def app():
-    # Configure page settings
-    st.set_page_config(
-        page_title="MERET - MITRE Entity Relationship Extraction Tool",
-        page_icon="🔍",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
+    # For visualizing sentiment analysis
+    def visualize_entity_sentiment(entity_type, entities, chunks):
+        st.subheader(f"Sentiment Analysis for {entity_type.replace('_', ' ').title()}")
+        if not entities:
+            st.info(f"No {entity_type} found for sentiment analysis")
+            return
+            
+        sentiment_data = []
+        for entity in entities:
+            sentiment_info = analyze_entity_sentiment(entity, chunks)
+            if sentiment_info["mentions"] > 0:
+                sentiment_data.append({
+                    "Entity": entity,
+                    "Sentiment": sentiment_info["sentiment"],
+                    "Mentions": sentiment_info["mentions"]
+                })
+        
+        if sentiment_data:
+            sentiment_df = pd.DataFrame(sentiment_data)
+            
+            # Sort by sentiment for better visualization
+            sentiment_df = sentiment_df.sort_values("Sentiment")
+            
+            # Create color map based on sentiment
+            colors = ['#d32f2f' if s < -0.1 else '#2e7d32' if s > 0.1 else '#ffa000' 
+                    for s in sentiment_df["Sentiment"]]
+                    
+            # Plot sentiment chart
+            fig, ax = plt.subplots(figsize=(10, max(5, len(sentiment_df) * 0.3)))
+            bars = ax.barh(sentiment_df["Entity"], sentiment_df["Sentiment"], color=colors)
+            ax.set_xlim(-1, 1)
+            ax.set_xlabel("Negative <--> Positive")
+            ax.set_title(f"Sentiment Analysis for {entity_type.replace('_', ' ').title()}")
+            ax.axvline(x=0, color='gray', linestyle='-', alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig)
+            
+            # Display as table too
+            sentiment_df["Sentiment"] = sentiment_df["Sentiment"].map(lambda x: f"{x:.2f}")
+            st.dataframe(sentiment_df)
+        else:
+            st.info("No sentiment data available")
     
-    # Initialize session state for storing multiple PDF data and user preferences
+    # For visualizing geo locations
+    def visualize_locations(locations, chunks):
+        st.subheader("Geographic Entities")
+        if not locations:
+            st.info("No locations found for mapping")
+            return
+            
+        # Get geo data
+        geo_data = get_entity_locations(locations)
+        
+        if not geo_data:
+            st.warning("Could not geocode any locations")
+            return
+            
+        # Create sentiment info for locations
+        loc_with_sentiment = []
+        for loc in geo_data:
+            sentiment_info = analyze_entity_sentiment(loc, chunks)
+            sentiment = sentiment_info["sentiment"]
+            mentions = sentiment_info["mentions"]
+            loc_with_sentiment.append({
+                "location": loc,
+                "lat": geo_data[loc]["latitude"],
+                "lon": geo_data[loc]["longitude"],
+                "sentiment": sentiment,
+                "mentions": mentions,
+                "address": geo_data[loc]["address"]
+            })
+        
+        if loc_with_sentiment:
+            # Create map centered on average coordinates
+            avg_lat = sum(item["lat"] for item in loc_with_sentiment) / len(loc_with_sentiment)
+            avg_lon = sum(item["lon"] for item in loc_with_sentiment) / len(loc_with_sentiment)
+            m = folium.Map(location=[avg_lat, avg_lon], zoom_start=4)
+            
+            # Add markers for each location
+            for item in loc_with_sentiment:
+                # Determine color based on sentiment
+                if item["sentiment"] < -0.1:
+                    color = "red"
+                elif item["sentiment"] > 0.1:
+                    color = "green"
+                else:
+                    color = "orange"
+                
+                # Create popup content
+                popup_content = f"""
+                <b>{item['location']}</b><br>
+                Sentiment: {item['sentiment']:.2f}<br>
+                Mentions: {item['mentions']}<br>
+                Address: {item['address']}
+                """
+                
+                # Add marker
+                folium.Marker(
+                    location=[item["lat"], item["lon"]],
+                    popup=folium.Popup(popup_content, max_width=300),
+                    tooltip=item["location"],
+                    icon=folium.Icon(color=color)
+                ).add_to(m)
+            
+            # Display map
+            folium_static(m)
+            
+            # Show as table
+            loc_df = pd.DataFrame(loc_with_sentiment)
+            loc_df["sentiment"] = loc_df["sentiment"].map(lambda x: f"{x:.2f}")
+            st.dataframe(loc_df[["location", "sentiment", "mentions", "address"]])
+            
+    st.title("MERET - MITRE Entity Relationship Extraction Tool")
+
+    # Initialize session state for storing multiple PDF data
     if 'all_entities' not in st.session_state:
         st.session_state.all_entities = {}
     if 'all_relationships' not in st.session_state:
@@ -629,73 +805,12 @@ def app():
             "emails": [],
             "company_names": [],
             "person_names": [],
-            "ibans": []
+            "ibans": [],
+            "locations": []
         }
-    if 'dark_mode' not in st.session_state:
-        st.session_state.dark_mode = False
-        
-    # Dark mode toggle in sidebar
-    with st.sidebar:
-        st.title("Settings")
-        
-        # Create a callback to handle the toggle state change
-        def toggle_dark_mode():
-            st.session_state.dark_mode = not st.session_state.dark_mode
-            
-        # Display the toggle with the callback
-        st.toggle(
-            "Dark Mode", 
-            value=st.session_state.dark_mode,
-            key="dark_mode_toggle", 
-            on_change=toggle_dark_mode
-        )
-    
-    # Apply custom CSS for dark mode
-    if st.session_state.dark_mode:
-        st.markdown("""
-        <style>
-        .stApp {
-            background-color: #1E1E1E;
-            color: #FFFFFF;
-        }
-        .st-bx {
-            background-color: #2D2D2D;
-        }
-        .st-bc {
-            background-color: #2D2D2D;
-        }
-        .st-bu {
-            background-color: #4F4F4F;
-        }
-        .stButton>button {
-            background-color: #4F4F4F;
-            color: white;
-        }
-        .stTextInput>div>div>input {
-            background-color: #3B3B3B;
-            color: white;
-        }
-        .stSelectbox>div>div>select {
-            background-color: #3B3B3B;
-            color: white;
-        }
-        .stExpander {
-            background-color: #2D2D2D;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-    
-    # Main title
-    st.title("MERET - MITRE Entity Relationship Extraction Tool")
 
-    # File uploader section
-    st.sidebar.header("Document Upload")
-    uploaded_files = st.sidebar.file_uploader(
-        "Upload PDFs", 
-        type=["pdf"], 
-        accept_multiple_files=True,
-        help="Select one or more PDF files to analyze"
-    )
+    # File uploader for multiple PDF files
+    uploaded_files = st.sidebar.file_uploader("Upload PDFs", type=["pdf"], accept_multiple_files=True)
     
     # Initialize OpenAI client
     openai_client = AzureOpenAI(
@@ -746,12 +861,14 @@ def app():
                 "emails": [],
                 "company_names": [],
                 "person_names": [],
-                "ibans": []
+                "ibans": [],
+                "locations": []
             }
             
             for pdf_entities in st.session_state.all_entities.values():
                 for key in combined:
-                    combined[key].extend(pdf_entities.get(key, []))
+                    if key in pdf_entities:
+                        combined[key].extend(pdf_entities.get(key, []))
             
             # Deduplicate combined entities
             for key in combined:
@@ -841,6 +958,8 @@ def app():
             node_type_map[per] = "person"
         for iban in entities.get("ibans", []):
             node_type_map[iban] = "iban"
+        for loc in entities.get("locations", []):
+            node_type_map[loc] = "location"
         return node_type_map
 
     node_type_map = build_node_type_map(st.session_state.combined_entities)
@@ -867,23 +986,54 @@ def app():
         filtered_rels.append(rel)
     st.write(f"Showing {len(filtered_rels)} relationships based on filters.")
 
-    # Collect all chunks for aggregation
+    # Collect all chunks for aggregation and sentiment analysis
     all_chunks_list = []
     for chunks_list in st.session_state.all_chunks.values():
         all_chunks_list.extend(chunks_list)
 
-    # Visualize top entities counts
-    aggregated_counts = aggregate_entities_with_counts(all_chunks_list, openai_client)
-    visualize_top_entities(aggregated_counts, top_n=10)
-
-    # Build and display the interactive PyVis graph if there are relationships
-    if filtered_rels:
-        html_file = visualize_relationships_pyvis(filtered_rels)
-        with open(html_file, "r", encoding="utf-8") as f:
-            html_content = f.read()
-        st.components.v1.html(html_content, height=800)
-    else:
-        st.write("No relationships match your filters.")
+    # Tabs for different views
+    tab1, tab2, tab3, tab4 = st.tabs(["Network Graph", "Entity Frequency", "Sentiment Analysis", "Geo Mapping"])
+    
+    with tab1:
+        # Build and display the interactive PyVis graph if there are relationships
+        if filtered_rels:
+            html_file = visualize_relationships_pyvis(filtered_rels)
+            with open(html_file, "r", encoding="utf-8") as f:
+                html_content = f.read()
+            st.components.v1.html(html_content, height=800)
+        else:
+            st.write("No relationships match your filters.")
+    
+    with tab2:
+        # Visualize top entities counts
+        aggregated_counts = aggregate_entities_with_counts(all_chunks_list, openai_client)
+        visualize_top_entities(aggregated_counts, top_n=10)
+    
+    with tab3:
+        # Allow user to select entity types for sentiment analysis
+        entity_type_options = [
+            ("person_names", "Person Names"),
+            ("company_names", "Company Names"),
+            ("locations", "Locations")
+        ]
+        
+        selected_entity_type = st.selectbox(
+            "Select entity type for sentiment analysis:",
+            options=[et[0] for et in entity_type_options],
+            format_func=lambda x: dict(entity_type_options)[x]
+        )
+        
+        # Run sentiment analysis on selected entity type
+        entities_for_sentiment = st.session_state.combined_entities.get(selected_entity_type, [])
+        if entities_for_sentiment:
+            visualize_entity_sentiment(selected_entity_type, entities_for_sentiment, all_chunks_list)
+        else:
+            st.info(f"No {dict(entity_type_options)[selected_entity_type]} found for sentiment analysis")
+    
+    with tab4:
+        # Visualize locations on a map
+        locations = st.session_state.combined_entities.get("locations", [])
+        visualize_locations(locations, all_chunks_list)
 
 if __name__ == "__main__":
     app()

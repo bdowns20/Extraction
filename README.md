@@ -10,7 +10,7 @@ MERET is a Streamlit application designed to extract, validate, and visualize en
 - **Incremental Processing**: Maintains state between sessions for continuous analysis
 
 ### Entity Extraction
-- **Advanced Entity Recognition**: Uses Azure OpenAI to extract entities such as IP addresses, emails, company names, person names, and IBANs
+- **Advanced Entity Recognition**: Uses Azure OpenAI to extract entities such as IP addresses, emails, company names, person names, IBANs, and geographic locations
 - **Russian NLP Integration**: Enhances entity recognition by using Natasha to detect Russian names and organizations
 - **Fuzzy Deduplication**: Applies fuzzy matching to deduplicate similar entities
 - **Entity Frequency Analysis**: Tracks and displays entity frequency across documents
@@ -19,12 +19,14 @@ MERET is a Streamlit application designed to extract, validate, and visualize en
 - **Relationship Extraction**: Extracts relationships between entities (e.g., HAS_EMAIL, HAS_IP) and provides additional contextual details
 - **Cross-Document Relationships**: Tracks relationships across multiple documents
 - **Relationship Filtering**: Filter relationships by document, relationship type, or entity name
+- **Sentiment Analysis**: Analyzes sentiment for entity mentions across documents
 
 ### Visualization
 - **Interactive Network Graphs**: Visualizes relationships using interactive graphs (via PyVis)
 - **Entity Frequency Charts**: Displays bar charts for entity frequency (via Streamlit and Matplotlib)
+- **Sentiment Visualization**: Displays sentiment analysis for entities with positive/negative indicators
+- **Geographic Mapping**: Visualizes location entities on interactive maps with sentiment analysis
 - **Customizable Filtering**: Filter visualizations based on document source, relationship type, or search terms
-- **Dark Mode Support**: Toggle between light and dark themes for better visibility in different environments
 
 ### Export Options
 - **CSV Export**: Exports extracted entities and relationships as CSV files
