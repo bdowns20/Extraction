@@ -9,3 +9,4 @@ natasha
 pdfminer.six
 openai
 setuptools
+reportlab

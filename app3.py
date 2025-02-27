@@ -3,11 +3,17 @@ import csv
 import logging
 import os
 import re
+import xml.etree.ElementTree as ET
 from io import BytesIO
 from collections import Counter
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 
 # pdfminer for PDF extraction
 from pdfminer.high_level import extract_text as pdf_extract_text
@@ -414,12 +420,12 @@ def aggregate_entities_with_counts(chunks, openai_client):
 # Main Pipeline for Extraction
 # ---------------------------------------
 def extract_data_from_pdf(pdf_file_path, openai_client, max_chars=1500):
-    logger.info("Starting PDF extraction process...")
+    logger.info(f"Starting PDF extraction process for {pdf_file_path}...")
     raw_text = extract_text_from_pdf(pdf_file_path)
     cleaned_text = clean_text(raw_text)
     if not cleaned_text:
         logger.error("No text extracted from PDF.")
-        return {}, []
+        return {}, [], []
     chunks = chunk_text(cleaned_text, max_chars=max_chars)
     entities = aggregate_entities(chunks, openai_client)
     relationships = aggregate_relationships(chunks, openai_client)
@@ -429,42 +435,285 @@ def extract_data_from_pdf(pdf_file_path, openai_client, max_chars=1500):
     return entities, relationships, chunks
 
 # ---------------------------------------
+# Export to PDF Functions
+# ---------------------------------------
+def export_entities_to_pdf(entities, pdf_file_path="exported_entities.pdf"):
+    """
+    Export entities to a formatted PDF document.
+    """
+    try:
+        doc = SimpleDocTemplate(pdf_file_path, pagesize=letter)
+        story = []
+        styles = getSampleStyleSheet()
+        
+        # Add title
+        title = Paragraph(f"Extracted Entities Report - {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles['Heading1'])
+        story.append(title)
+        story.append(Spacer(1, 12))
+        
+        # Process each entity type
+        for entity_type, values in entities.items():
+            if values:
+                # Add section header
+                header = Paragraph(f"{entity_type.replace('_', ' ').title()}", styles['Heading2'])
+                story.append(header)
+                story.append(Spacer(1, 6))
+                
+                # Create data for table
+                data = [["#", "Value"]]
+                for i, value in enumerate(values, 1):
+                    data.append([str(i), value])
+                
+                # Create table
+                table = Table(data, colWidths=[30, 450])
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ]))
+                
+                story.append(table)
+                story.append(Spacer(1, 12))
+            
+        # Build PDF
+        doc.build(story)
+        logger.info(f"Entities exported to PDF: {pdf_file_path}")
+        return pdf_file_path
+    except Exception as e:
+        logger.error(f"Error exporting entities to PDF: {e}")
+        return None
+
+# ---------------------------------------
+# Export to Analyst Notebook Functions
+# ---------------------------------------
+def export_to_analyst_notebook(entities, relationships, file_path="analyst_notebook_export.xml"):
+    """
+    Export entities and relationships to Analyst Notebook compatible XML format.
+    Based on i2 Analyst's Notebook XML import format.
+    """
+    try:
+        # Create root element
+        root = ET.Element("ANALYSIS_DATA")
+        root.set("Version", "4")
+        
+        # Create entities section
+        entities_element = ET.SubElement(root, "ENTITIES")
+        
+        # Counter for unique IDs
+        entity_counter = 1
+        entity_id_map = {}  # Map entity names to their IDs
+        
+        # Process each entity type
+        for entity_type, values in entities.items():
+            icon_type = {
+                "person_names": "ET_PERSON",
+                "company_names": "ET_ORGANIZATION",
+                "ip_addresses": "ET_NETWORK_IPV4_ADDRESS",
+                "emails": "ET_EMAIL_ADDRESS",
+                "ibans": "ET_BANK_ACCOUNT"
+            }.get(entity_type, "ET_THING")
+            
+            for value in values:
+                entity = ET.SubElement(entities_element, "ENTITY")
+                entity.set("EntityId", f"e{entity_counter}")
+                entity_id_map[value] = f"e{entity_counter}"
+                entity_counter += 1
+                
+                # Set entity attributes
+                ET.SubElement(entity, "IDENTITY").text = value
+                ET.SubElement(entity, "TYPE").text = icon_type
+                ET.SubElement(entity, "LABEL").text = value
+                # Add additional attributes if needed
+                props = ET.SubElement(entity, "PROPERTIES")
+                ET.SubElement(props, "PROPERTY", Name="Entity Type").text = entity_type.replace("_", " ").title()
+        
+        # Create links section
+        links_element = ET.SubElement(root, "LINKS")
+        
+        # Process relationships
+        link_counter = 1
+        for rel in relationships:
+            source = rel.get("source", "").strip()
+            target = rel.get("target", "").strip()
+            
+            # Skip if source or target not in our entity map
+            if source not in entity_id_map or target not in entity_id_map:
+                continue
+                
+            link = ET.SubElement(links_element, "LINK")
+            link.set("LinkId", f"l{link_counter}")
+            link_counter += 1
+            
+            # Set link attributes
+            ET.SubElement(link, "IDENTITY").text = rel.get("relation", "")
+            ET.SubElement(link, "TYPE").text = "LT_ASSOCIATION"
+            ET.SubElement(link, "LABEL").text = rel.get("relation", "")
+            ET.SubElement(link, "END1", EntityId=entity_id_map[source], EntityLocationX="0", EntityLocationY="0")
+            ET.SubElement(link, "END2", EntityId=entity_id_map[target], EntityLocationX="0", EntityLocationY="0")
+            
+            # Add details as property if available
+            if rel.get("details"):
+                props = ET.SubElement(link, "PROPERTIES")
+                ET.SubElement(props, "PROPERTY", Name="Details").text = rel.get("details", "")
+                ET.SubElement(props, "PROPERTY", Name="Source").text = rel.get("pdf_id", "")
+        
+        # Create XML tree and save to file
+        tree = ET.ElementTree(root)
+        tree.write(file_path, encoding="utf-8", xml_declaration=True)
+        logger.info(f"Exported to Analyst Notebook format: {file_path}")
+        return file_path
+    except Exception as e:
+        logger.error(f"Error exporting to Analyst Notebook format: {e}")
+        return None
+
+# ---------------------------------------
 # Main App (Streamlit)
 # ---------------------------------------
 def app():
     st.title("PDF Relationship Viewer")
 
-    # File uploader for PDF files
-    uploaded_file = st.sidebar.file_uploader("Upload a PDF", type=["pdf"])
-    if uploaded_file is not None:
-        pdf_file_path = os.path.join("temp", uploaded_file.name)
-        os.makedirs("temp", exist_ok=True)
-        with open(pdf_file_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-    else:
-        st.write("Please upload a PDF file.")
-        return
+    # Initialize session state for storing multiple PDF data
+    if 'all_entities' not in st.session_state:
+        st.session_state.all_entities = {}
+    if 'all_relationships' not in st.session_state:
+        st.session_state.all_relationships = []
+    if 'all_chunks' not in st.session_state:
+        st.session_state.all_chunks = {}
+    if 'processed_pdfs' not in st.session_state:
+        st.session_state.processed_pdfs = []
+    if 'combined_entities' not in st.session_state:
+        st.session_state.combined_entities = {
+            "ip_addresses": [],
+            "emails": [],
+            "company_names": [],
+            "person_names": [],
+            "ibans": []
+        }
 
-    st.info("Processing PDF...")
-    from openai import AzureOpenAI
+    # File uploader for multiple PDF files
+    uploaded_files = st.sidebar.file_uploader("Upload PDFs", type=["pdf"], accept_multiple_files=True)
+    
+    # Initialize OpenAI client
     openai_client = AzureOpenAI(
         azure_endpoint=AZURE_ENDPOINT,
         api_key=AZURE_API_KEY,
         default_headers={"Content-Type": "application/json"},
         api_version=API_VERSION,
     )
-    entities, relationships, chunks = extract_data_from_pdf(pdf_file_path, openai_client, max_chars=1500)
-
-    st.info("Extraction complete.")
-    st.subheader("Extracted Entities:")
-    st.json(entities)
-    st.subheader("Extracted Relationships:")
-    st.json(relationships)
-
-    save_entities_to_csv(entities, "extracted_entities.csv")
-    save_relationships_to_csv(relationships, "extracted_relationships.csv")
-
-    # Build node type map from extracted entities for color-coding
+    
+    # Process uploaded PDFs if any
+    if uploaded_files:
+        os.makedirs("temp", exist_ok=True)
+        
+        # Identify new PDFs to process
+        new_pdfs = []
+        for uploaded_file in uploaded_files:
+            pdf_name = uploaded_file.name
+            if pdf_name not in st.session_state.processed_pdfs:
+                new_pdfs.append(uploaded_file)
+                
+        # Process new PDFs if any
+        if new_pdfs:
+            progress_bar = st.progress(0)
+            for i, uploaded_file in enumerate(new_pdfs):
+                pdf_name = uploaded_file.name
+                st.info(f"Processing {pdf_name}...")
+                
+                # Save file temporarily
+                pdf_file_path = os.path.join("temp", pdf_name)
+                with open(pdf_file_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                
+                # Extract data
+                entities, relationships, chunks = extract_data_from_pdf(pdf_file_path, openai_client, max_chars=1500)
+                
+                # Store results
+                st.session_state.all_entities[pdf_name] = entities
+                st.session_state.all_relationships.extend(relationships)
+                st.session_state.all_chunks[pdf_name] = chunks
+                st.session_state.processed_pdfs.append(pdf_name)
+                
+                # Update progress
+                progress_bar.progress((i + 1) / len(new_pdfs))
+            
+            # Combine all entities
+            combined = {
+                "ip_addresses": [],
+                "emails": [],
+                "company_names": [],
+                "person_names": [],
+                "ibans": []
+            }
+            
+            for pdf_entities in st.session_state.all_entities.values():
+                for key in combined:
+                    combined[key].extend(pdf_entities.get(key, []))
+            
+            # Deduplicate combined entities
+            for key in combined:
+                combined[key] = list(set(combined[key]))
+                
+            st.session_state.combined_entities = combined
+            st.success(f"Processed {len(new_pdfs)} new PDFs.")
+    
+    # If no PDFs are processed yet, show a message and return
+    if not st.session_state.processed_pdfs:
+        st.write("Please upload PDF files to analyze.")
+        return
+    
+    # Display summary of processed PDFs
+    st.subheader("Processed PDFs:")
+    st.write(", ".join(st.session_state.processed_pdfs))
+    
+    # Show combined entities
+    with st.expander("View Combined Extracted Entities", expanded=False):
+        st.json(st.session_state.combined_entities)
+    
+    # Export buttons section
+    st.subheader("Export Options")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("Export Entities to CSV"):
+            save_entities_to_csv(st.session_state.combined_entities, "extracted_entities.csv")
+            st.success("Entities saved to extracted_entities.csv")
+    
+    with col2:
+        if st.button("Export to PDF"):
+            pdf_path = export_entities_to_pdf(st.session_state.combined_entities)
+            with open(pdf_path, "rb") as pdf_file:
+                st.download_button(
+                    label="Download PDF Report",
+                    data=pdf_file,
+                    file_name="entity_report.pdf",
+                    mime="application/pdf"
+                )
+    
+    with col3:
+        if st.button("Export to Analyst Notebook"):
+            xml_path = export_to_analyst_notebook(
+                st.session_state.combined_entities, 
+                st.session_state.all_relationships
+            )
+            with open(xml_path, "r", encoding="utf-8") as xml_file:
+                xml_content = xml_file.read()
+                st.download_button(
+                    label="Download Analyst Notebook XML",
+                    data=xml_content,
+                    file_name="analyst_notebook_export.xml",
+                    mime="application/xml"
+                )
+    
+    # Save relationships to CSV
+    if st.button("Export Relationships to CSV"):
+        save_relationships_to_csv(st.session_state.all_relationships, "extracted_relationships.csv")
+        st.success("Relationships saved to extracted_relationships.csv")
+    
+    # Build node type map from combined entities for color-coding
     def build_node_type_map(entities):
         node_type_map = {}
         for ip in entities.get("ip_addresses", []):
@@ -479,17 +728,19 @@ def app():
             node_type_map[iban] = "iban"
         return node_type_map
 
-    node_type_map = build_node_type_map(entities)
+    node_type_map = build_node_type_map(st.session_state.combined_entities)
 
     # Sidebar filtering options for relationships
-    pdf_ids = sorted({rel["pdf_id"] for rel in relationships})
-    relation_types = sorted({rel["relation"] for rel in relationships})
+    pdf_ids = sorted({rel["pdf_id"] for rel in st.session_state.all_relationships})
+    relation_types = sorted({rel["relation"] for rel in st.session_state.all_relationships})
     st.sidebar.header("Relationship Filters")
     selected_pdfs = st.sidebar.multiselect("Select PDFs to include:", options=pdf_ids, default=pdf_ids)
     selected_types = st.sidebar.multiselect("Select relationship types:", options=relation_types, default=relation_types)
     search_text = st.sidebar.text_input("Search for entity (source or target):", "")
+    
+    # Filter relationships based on selections
     filtered_rels = []
-    for rel in relationships:
+    for rel in st.session_state.all_relationships:
         if selected_pdfs and rel.get("pdf_id", "") not in selected_pdfs:
             continue
         if selected_types and rel.get("relation", "") not in selected_types:
@@ -501,8 +752,13 @@ def app():
         filtered_rels.append(rel)
     st.write(f"Showing {len(filtered_rels)} relationships based on filters.")
 
+    # Collect all chunks for aggregation
+    all_chunks_list = []
+    for chunks_list in st.session_state.all_chunks.values():
+        all_chunks_list.extend(chunks_list)
+
     # Visualize top entities counts
-    aggregated_counts = aggregate_entities_with_counts(chunks, openai_client)
+    aggregated_counts = aggregate_entities_with_counts(all_chunks_list, openai_client)
     visualize_top_entities(aggregated_counts, top_n=10)
 
     # Build and display the interactive PyVis graph if there are relationships
