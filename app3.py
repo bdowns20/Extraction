@@ -637,11 +637,18 @@ def app():
     # Dark mode toggle in sidebar
     with st.sidebar:
         st.title("Settings")
-        dark_mode = st.toggle("Dark Mode", value=st.session_state.dark_mode)
         
-        if dark_mode != st.session_state.dark_mode:
-            st.session_state.dark_mode = dark_mode
-            st.experimental_rerun()
+        # Create a callback to handle the toggle state change
+        def toggle_dark_mode():
+            st.session_state.dark_mode = not st.session_state.dark_mode
+            
+        # Display the toggle with the callback
+        st.toggle(
+            "Dark Mode", 
+            value=st.session_state.dark_mode,
+            key="dark_mode_toggle", 
+            on_change=toggle_dark_mode
+        )
     
     # Apply custom CSS for dark mode
     if st.session_state.dark_mode:
