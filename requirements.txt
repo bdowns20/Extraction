@@ -13,3 +13,4 @@ textblob
 folium
 streamlit-folium
 geopy
+nltk

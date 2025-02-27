@@ -42,11 +42,18 @@ AZURE_API_KEY = "9abc905da5104e8eb8d6ec3ceb27f767"  # Replace with your actual A
 AZURE_ENDPOINT = "https://aoai.apim.mitre.org/api-key"  # Replace with your actual endpoint
 API_VERSION = "2023-03-15-preview"
 
-# Initialize geocoder
-geolocator = Nominatim(user_agent="meret-entity-extractor")
+# Initialize geocoder with a timeout
+geolocator = Nominatim(user_agent="meret-entity-extractor", timeout=10)
 
 # Cache for geocoding results to avoid repeated API calls
 geo_cache = {}
+
+# Initialize NLTK data for TextBlob
+try:
+    import nltk
+    nltk.download('punkt', quiet=True)
+except Exception as e:
+    logger.error(f"Error downloading NLTK data: {e}")
 
 # ---------------------------------------
 # Logging Configuration
@@ -249,19 +256,25 @@ def analyze_entity_sentiment(entity, text_chunks):
     """
     Analyze sentiment for an entity across all text chunks
     Returns a sentiment score (-1 to 1) and count of mentions
+    Uses a simpler approach to avoid TextBlob sentence tokenization issues
     """
     sentiment_sum = 0.0
     mention_count = 0
     
     for chunk in text_chunks:
         # Count occurrences in this chunk
-        if entity.lower() in chunk.lower():
-            # Find each sentence containing the entity
-            blob = TextBlob(chunk)
-            for sentence in blob.sentences:
-                if entity.lower() in sentence.string.lower():
-                    sentiment_sum += sentence.sentiment.polarity
-                    mention_count += 1
+        lower_chunk = chunk.lower()
+        lower_entity = entity.lower()
+        
+        if lower_entity in lower_chunk:
+            # Simple approach: analyze sentiment for the whole chunk
+            # if it contains the entity
+            try:
+                blob = TextBlob(chunk)
+                sentiment_sum += blob.sentiment.polarity
+                mention_count += 1
+            except Exception as e:
+                logger.warning(f"Error analyzing sentiment: {e}")
     
     # Calculate average sentiment if there are mentions
     if mention_count > 0:
@@ -279,18 +292,51 @@ def get_entity_locations(locations):
     """
     Get geolocation data for location entities
     Returns a dictionary of locations with coordinates
+    Handles geocoding errors gracefully
     """
     geo_results = {}
     
+    # Simplify by providing a few common locations manually to avoid API calls
+    common_locations = {
+        "moscow": {"latitude": 55.7558, "longitude": 37.6173, "address": "Moscow, Russia"},
+        "new york": {"latitude": 40.7128, "longitude": -74.0060, "address": "New York, NY, USA"},
+        "london": {"latitude": 51.5074, "longitude": -0.1278, "address": "London, UK"},
+        "berlin": {"latitude": 52.5200, "longitude": 13.4050, "address": "Berlin, Germany"},
+        "paris": {"latitude": 48.8566, "longitude": 2.3522, "address": "Paris, France"},
+        "tokyo": {"latitude": 35.6762, "longitude": 139.6503, "address": "Tokyo, Japan"},
+        "beijing": {"latitude": 39.9042, "longitude": 116.4074, "address": "Beijing, China"},
+        "washington": {"latitude": 38.9072, "longitude": -77.0369, "address": "Washington, DC, USA"}
+    }
+    
+    # Update our cache with common locations
+    for loc, data in common_locations.items():
+        if loc not in geo_cache:
+            geo_cache[loc] = data
+    
     for location in locations:
+        location_lower = location.lower()
+        
         # Skip if already in cache
         if location in geo_cache:
             geo_results[location] = geo_cache[location]
             continue
         
+        # Check if a common location is contained in this location name
+        found = False
+        for common_loc in common_locations:
+            if common_loc in location_lower:
+                geo_results[location] = common_locations[common_loc]
+                geo_cache[location] = common_locations[common_loc]
+                found = True
+                break
+                
+        if found:
+            continue
+        
+        # If not found in common locations, try geocoding
         try:
             # Try to geocode the location
-            geo_location = geolocator.geocode(location, timeout=10)
+            geo_location = geolocator.geocode(location, timeout=5)
             if geo_location:
                 result = {
                     "latitude": geo_location.latitude,
@@ -725,68 +771,78 @@ def app():
         if not locations:
             st.info("No locations found for mapping")
             return
-            
-        # Get geo data
-        geo_data = get_entity_locations(locations)
         
-        if not geo_data:
-            st.warning("Could not geocode any locations")
-            return
+        try:
+            # Get geo data
+            geo_data = get_entity_locations(locations)
             
-        # Create sentiment info for locations
-        loc_with_sentiment = []
-        for loc in geo_data:
-            sentiment_info = analyze_entity_sentiment(loc, chunks)
-            sentiment = sentiment_info["sentiment"]
-            mentions = sentiment_info["mentions"]
-            loc_with_sentiment.append({
-                "location": loc,
-                "lat": geo_data[loc]["latitude"],
-                "lon": geo_data[loc]["longitude"],
-                "sentiment": sentiment,
-                "mentions": mentions,
-                "address": geo_data[loc]["address"]
-            })
-        
-        if loc_with_sentiment:
-            # Create map centered on average coordinates
-            avg_lat = sum(item["lat"] for item in loc_with_sentiment) / len(loc_with_sentiment)
-            avg_lon = sum(item["lon"] for item in loc_with_sentiment) / len(loc_with_sentiment)
-            m = folium.Map(location=[avg_lat, avg_lon], zoom_start=4)
-            
-            # Add markers for each location
-            for item in loc_with_sentiment:
-                # Determine color based on sentiment
-                if item["sentiment"] < -0.1:
-                    color = "red"
-                elif item["sentiment"] > 0.1:
-                    color = "green"
-                else:
-                    color = "orange"
+            if not geo_data:
+                st.warning("Could not geocode any locations")
+                return
                 
-                # Create popup content
-                popup_content = f"""
-                <b>{item['location']}</b><br>
-                Sentiment: {item['sentiment']:.2f}<br>
-                Mentions: {item['mentions']}<br>
-                Address: {item['address']}
-                """
+            # Create sentiment info for locations
+            loc_with_sentiment = []
+            for loc in geo_data:
+                sentiment_info = analyze_entity_sentiment(loc, chunks)
+                sentiment = sentiment_info["sentiment"]
+                mentions = sentiment_info["mentions"]
+                loc_with_sentiment.append({
+                    "location": loc,
+                    "lat": geo_data[loc]["latitude"],
+                    "lon": geo_data[loc]["longitude"],
+                    "sentiment": sentiment,
+                    "mentions": mentions,
+                    "address": geo_data[loc]["address"]
+                })
+            
+            if loc_with_sentiment:
+                # Create a safer display of the data as a table first
+                st.subheader("Location Data")
+                loc_df = pd.DataFrame(loc_with_sentiment)
+                loc_df["sentiment"] = loc_df["sentiment"].map(lambda x: f"{x:.2f}")
+                st.dataframe(loc_df[["location", "sentiment", "mentions", "address"]])
                 
-                # Add marker
-                folium.Marker(
-                    location=[item["lat"], item["lon"]],
-                    popup=folium.Popup(popup_content, max_width=300),
-                    tooltip=item["location"],
-                    icon=folium.Icon(color=color)
-                ).add_to(m)
-            
-            # Display map
-            folium_static(m)
-            
-            # Show as table
-            loc_df = pd.DataFrame(loc_with_sentiment)
-            loc_df["sentiment"] = loc_df["sentiment"].map(lambda x: f"{x:.2f}")
-            st.dataframe(loc_df[["location", "sentiment", "mentions", "address"]])
+                try:
+                    # Create map centered on average coordinates
+                    avg_lat = sum(item["lat"] for item in loc_with_sentiment) / len(loc_with_sentiment)
+                    avg_lon = sum(item["lon"] for item in loc_with_sentiment) / len(loc_with_sentiment)
+                    m = folium.Map(location=[avg_lat, avg_lon], zoom_start=4)
+                    
+                    # Add markers for each location
+                    for item in loc_with_sentiment:
+                        # Determine color based on sentiment
+                        if item["sentiment"] < -0.1:
+                            color = "red"
+                        elif item["sentiment"] > 0.1:
+                            color = "green"
+                        else:
+                            color = "orange"
+                        
+                        # Create popup content
+                        popup_content = f"""
+                        <b>{item['location']}</b><br>
+                        Sentiment: {float(item['sentiment']):.2f}<br>
+                        Mentions: {item['mentions']}<br>
+                        Address: {item['address']}
+                        """
+                        
+                        # Add marker
+                        folium.Marker(
+                            location=[item["lat"], item["lon"]],
+                            popup=folium.Popup(popup_content, max_width=300),
+                            tooltip=item["location"],
+                            icon=folium.Icon(color=color)
+                        ).add_to(m)
+                    
+                    # Display map
+                    st.subheader("Location Map")
+                    folium_static(m)
+                except Exception as e:
+                    st.error(f"Error displaying map: {e}")
+                    logger.error(f"Map display error: {e}")
+        except Exception as e:
+            st.error(f"Error processing location data: {e}")
+            logger.error(f"Location visualization error: {e}")
             
     st.title("MERET - MITRE Entity Relationship Extraction Tool")
 
