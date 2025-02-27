@@ -329,27 +329,41 @@ def entities_to_csv(entities):
     Convert entities to CSV string for download
     """
     try:
-        output = BytesIO()
+        # Use StringIO for text data in memory
+        from io import StringIO
+        output = StringIO()
         writer = csv.writer(output)
         writer.writerow(["entity_type", "value"])
+        
+        # Write each entity to the CSV
         for entity_type, values in entities.items():
             for val in values:
-                val_fixed = val.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
+                # Handle potential encoding issues
+                val_fixed = str(val).encode('utf-8', errors='replace').decode('utf-8', errors='replace')
                 writer.writerow([entity_type, val_fixed])
         
-        return output.getvalue().decode('utf-8')
+        # Get the CSV content
+        csv_content = output.getvalue()
+        logger.info(f"Generated CSV with {sum(len(values) for values in entities.values())} entity rows")
+        return csv_content
     except Exception as e:
         logger.error(f"Error converting entities to CSV: {e}")
-        return ""
+        st.error(f"Error generating CSV: {e}")
+        return "entity_type,value\nerror,error generating CSV"
 
 def relationships_to_csv(relationships):
     """
     Convert relationships to CSV string for download
     """
     try:
-        output = BytesIO()
+        # Use StringIO for text data in memory
+        from io import StringIO
+        output = StringIO()
         writer = csv.writer(output)
         writer.writerow(["source", "relation", "target", "details", "pdf_id"])
+        
+        row_count = 0
+        # Write each relationship to the CSV
         for rel in relationships:
             source = rel.get("source", "")
             relation = rel.get("relation", "")
@@ -357,17 +371,24 @@ def relationships_to_csv(relationships):
             details = rel.get("details", "")
             pdf_id = rel.get("pdf_id", "")
             
-            source_fixed = source.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
-            relation_fixed = relation.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
-            target_fixed = target.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
-            details_fixed = details.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
+            # Handle potential encoding issues
+            source_fixed = str(source).encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+            relation_fixed = str(relation).encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+            target_fixed = str(target).encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+            details_fixed = str(details).encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+            pdf_id_fixed = str(pdf_id).encode('utf-8', errors='replace').decode('utf-8', errors='replace')
             
-            writer.writerow([source_fixed, relation_fixed, target_fixed, details_fixed, pdf_id])
+            writer.writerow([source_fixed, relation_fixed, target_fixed, details_fixed, pdf_id_fixed])
+            row_count += 1
         
-        return output.getvalue().decode('utf-8')
+        # Get the CSV content
+        csv_content = output.getvalue()
+        logger.info(f"Generated CSV with {row_count} relationship rows")
+        return csv_content
     except Exception as e:
         logger.error(f"Error converting relationships to CSV: {e}")
-        return ""
+        st.error(f"Error generating CSV: {e}")
+        return "source,relation,target,details,pdf_id\nerror,error,error,error generating CSV,error"
 
 # For backward compatibility
 def save_entities_to_csv(entities, csv_file_path):
@@ -561,13 +582,24 @@ def export_to_analyst_notebook(entities, relationships, file_path="analyst_noteb
                 ET.SubElement(props, "PROPERTY", Name="Details").text = rel.get("details", "")
                 ET.SubElement(props, "PROPERTY", Name="Source").text = rel.get("pdf_id", "")
         
-        # Create XML tree and save to file
+        # Create XML string instead of saving to file
+        from io import StringIO
+        xml_output = StringIO()
         tree = ET.ElementTree(root)
-        tree.write(file_path, encoding="utf-8", xml_declaration=True)
-        logger.info(f"Exported to Analyst Notebook format: {file_path}")
-        return file_path
+        
+        # First save to a temporary file
+        temp_path = file_path
+        tree.write(temp_path, encoding="utf-8", xml_declaration=True)
+        
+        # Read the file back as a string
+        with open(temp_path, 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+            
+        logger.info(f"Generated Analyst Notebook XML with {entity_counter-1} entities and {link_counter-1} links")
+        return temp_path
     except Exception as e:
         logger.error(f"Error exporting to Analyst Notebook format: {e}")
+        st.error(f"Error generating Analyst Notebook XML: {e}")
         return None
 
 # ---------------------------------------
@@ -675,41 +707,58 @@ def app():
     
     # Export buttons section
     st.subheader("Export Options")
+    
+    # Check if there's data to export
+    has_entities = any(len(entities) > 0 for entities in st.session_state.combined_entities.values())
+    has_relationships = len(st.session_state.all_relationships) > 0
+    
     col1, col2 = st.columns(2)
     
     with col1:
         # Generate CSV data for entities
-        entities_csv = entities_to_csv(st.session_state.combined_entities)
-        st.download_button(
-            label="Export Entities to CSV",
-            data=entities_csv,
-            file_name="entity_export.csv",
-            mime="text/csv"
-        )
+        if has_entities:
+            entities_csv = entities_to_csv(st.session_state.combined_entities)
+            st.download_button(
+                label=f"Export Entities to CSV ({sum(len(v) for v in st.session_state.combined_entities.values())} items)",
+                data=entities_csv,
+                file_name="entity_export.csv",
+                mime="text/csv",
+                help="Download entities as a CSV file"
+            )
+        else:
+            st.info("No entities to export yet")
     
     with col2:
-        if st.button("Export to Analyst Notebook"):
+        if has_entities and has_relationships:
             xml_path = export_to_analyst_notebook(
                 st.session_state.combined_entities, 
                 st.session_state.all_relationships
             )
-            with open(xml_path, "r", encoding="utf-8") as xml_file:
-                xml_content = xml_file.read()
-                st.download_button(
-                    label="Download Analyst Notebook XML",
-                    data=xml_content,
-                    file_name="analyst_notebook_export.xml",
-                    mime="application/xml"
-                )
+            if xml_path:
+                with open(xml_path, "r", encoding="utf-8") as xml_file:
+                    xml_content = xml_file.read()
+                    st.download_button(
+                        label="Export to Analyst Notebook",
+                        data=xml_content,
+                        file_name="analyst_notebook_export.xml",
+                        mime="application/xml",
+                        help="Download data in i2 Analyst's Notebook format"
+                    )
+        else:
+            st.info("Need both entities and relationships for Analyst Notebook export")
     
     # Relationships CSV export
-    relationships_csv = relationships_to_csv(st.session_state.all_relationships)
-    st.download_button(
-        label="Export Relationships to CSV",
-        data=relationships_csv,
-        file_name="relationships_export.csv",
-        mime="text/csv"
-    )
+    if has_relationships:
+        relationships_csv = relationships_to_csv(st.session_state.all_relationships)
+        st.download_button(
+            label=f"Export Relationships to CSV ({len(st.session_state.all_relationships)} items)",
+            data=relationships_csv,
+            file_name="relationships_export.csv",
+            mime="text/csv",
+            help="Download relationships as a CSV file"
+        )
+    else:
+        st.info("No relationships to export yet")
     
     # Build node type map from combined entities for color-coding
     def build_node_type_map(entities):
