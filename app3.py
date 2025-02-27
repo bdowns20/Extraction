@@ -10,10 +10,6 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib import colors
 
 # pdfminer for PDF extraction
 from pdfminer.high_level import extract_text as pdf_extract_text
@@ -326,9 +322,58 @@ def aggregate_relationships(chunks, openai_client):
     return relationships_list
 
 # ---------------------------------------
-# CSV Saving Functions
+# CSV Functions
 # ---------------------------------------
+def entities_to_csv(entities):
+    """
+    Convert entities to CSV string for download
+    """
+    try:
+        output = BytesIO()
+        writer = csv.writer(output)
+        writer.writerow(["entity_type", "value"])
+        for entity_type, values in entities.items():
+            for val in values:
+                val_fixed = val.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
+                writer.writerow([entity_type, val_fixed])
+        
+        return output.getvalue().decode('utf-8')
+    except Exception as e:
+        logger.error(f"Error converting entities to CSV: {e}")
+        return ""
+
+def relationships_to_csv(relationships):
+    """
+    Convert relationships to CSV string for download
+    """
+    try:
+        output = BytesIO()
+        writer = csv.writer(output)
+        writer.writerow(["source", "relation", "target", "details", "pdf_id"])
+        for rel in relationships:
+            source = rel.get("source", "")
+            relation = rel.get("relation", "")
+            target = rel.get("target", "")
+            details = rel.get("details", "")
+            pdf_id = rel.get("pdf_id", "")
+            
+            source_fixed = source.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
+            relation_fixed = relation.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
+            target_fixed = target.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
+            details_fixed = details.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
+            
+            writer.writerow([source_fixed, relation_fixed, target_fixed, details_fixed, pdf_id])
+        
+        return output.getvalue().decode('utf-8')
+    except Exception as e:
+        logger.error(f"Error converting relationships to CSV: {e}")
+        return ""
+
+# For backward compatibility
 def save_entities_to_csv(entities, csv_file_path):
+    """
+    Save entities to a CSV file on disk
+    """
     try:
         with open(csv_file_path, mode="w", newline='', encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
@@ -341,21 +386,28 @@ def save_entities_to_csv(entities, csv_file_path):
     except Exception as e:
         logger.error(f"Error saving entities to CSV: {e}")
 
+# For backward compatibility
 def save_relationships_to_csv(relationships, csv_file_path):
+    """
+    Save relationships to a CSV file on disk
+    """
     try:
         with open(csv_file_path, mode="w", newline='', encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(["source", "relation", "target", "details"])
+            writer.writerow(["source", "relation", "target", "details", "pdf_id"])
             for rel in relationships:
                 source = rel.get("source", "")
                 relation = rel.get("relation", "")
                 target = rel.get("target", "")
                 details = rel.get("details", "")
+                pdf_id = rel.get("pdf_id", "")
+                
                 source_fixed = source.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
                 relation_fixed = relation.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
                 target_fixed = target.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
                 details_fixed = details.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
-                writer.writerow([source_fixed, relation_fixed, target_fixed, details_fixed])
+                
+                writer.writerow([source_fixed, relation_fixed, target_fixed, details_fixed, pdf_id])
         logger.info(f"Relationships saved to {csv_file_path}")
     except Exception as e:
         logger.error(f"Error saving relationships to CSV: {e}")
@@ -434,58 +486,6 @@ def extract_data_from_pdf(pdf_file_path, openai_client, max_chars=1500):
         rel["pdf_id"] = os.path.basename(pdf_file_path)
     return entities, relationships, chunks
 
-# ---------------------------------------
-# Export to PDF Functions
-# ---------------------------------------
-def export_entities_to_pdf(entities, pdf_file_path="exported_entities.pdf"):
-    """
-    Export entities to a formatted PDF document.
-    """
-    try:
-        doc = SimpleDocTemplate(pdf_file_path, pagesize=letter)
-        story = []
-        styles = getSampleStyleSheet()
-        
-        # Add title
-        title = Paragraph(f"Extracted Entities Report - {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles['Heading1'])
-        story.append(title)
-        story.append(Spacer(1, 12))
-        
-        # Process each entity type
-        for entity_type, values in entities.items():
-            if values:
-                # Add section header
-                header = Paragraph(f"{entity_type.replace('_', ' ').title()}", styles['Heading2'])
-                story.append(header)
-                story.append(Spacer(1, 6))
-                
-                # Create data for table
-                data = [["#", "Value"]]
-                for i, value in enumerate(values, 1):
-                    data.append([str(i), value])
-                
-                # Create table
-                table = Table(data, colWidths=[30, 450])
-                table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ]))
-                
-                story.append(table)
-                story.append(Spacer(1, 12))
-            
-        # Build PDF
-        doc.build(story)
-        logger.info(f"Entities exported to PDF: {pdf_file_path}")
-        return pdf_file_path
-    except Exception as e:
-        logger.error(f"Error exporting entities to PDF: {e}")
-        return None
 
 # ---------------------------------------
 # Export to Analyst Notebook Functions
@@ -574,7 +574,7 @@ def export_to_analyst_notebook(entities, relationships, file_path="analyst_noteb
 # Main App (Streamlit)
 # ---------------------------------------
 def app():
-    st.title("PDF Relationship Viewer")
+    st.title("MERET - MITRE Entity Relationship Extraction Tool")
 
     # Initialize session state for storing multiple PDF data
     if 'all_entities' not in st.session_state:
@@ -675,25 +675,19 @@ def app():
     
     # Export buttons section
     st.subheader("Export Options")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("Export Entities to CSV"):
-            save_entities_to_csv(st.session_state.combined_entities, "extracted_entities.csv")
-            st.success("Entities saved to extracted_entities.csv")
+        # Generate CSV data for entities
+        entities_csv = entities_to_csv(st.session_state.combined_entities)
+        st.download_button(
+            label="Export Entities to CSV",
+            data=entities_csv,
+            file_name="entity_export.csv",
+            mime="text/csv"
+        )
     
     with col2:
-        if st.button("Export to PDF"):
-            pdf_path = export_entities_to_pdf(st.session_state.combined_entities)
-            with open(pdf_path, "rb") as pdf_file:
-                st.download_button(
-                    label="Download PDF Report",
-                    data=pdf_file,
-                    file_name="entity_report.pdf",
-                    mime="application/pdf"
-                )
-    
-    with col3:
         if st.button("Export to Analyst Notebook"):
             xml_path = export_to_analyst_notebook(
                 st.session_state.combined_entities, 
@@ -708,10 +702,14 @@ def app():
                     mime="application/xml"
                 )
     
-    # Save relationships to CSV
-    if st.button("Export Relationships to CSV"):
-        save_relationships_to_csv(st.session_state.all_relationships, "extracted_relationships.csv")
-        st.success("Relationships saved to extracted_relationships.csv")
+    # Relationships CSV export
+    relationships_csv = relationships_to_csv(st.session_state.all_relationships)
+    st.download_button(
+        label="Export Relationships to CSV",
+        data=relationships_csv,
+        file_name="relationships_export.csv",
+        mime="text/csv"
+    )
     
     # Build node type map from combined entities for color-coding
     def build_node_type_map(entities):

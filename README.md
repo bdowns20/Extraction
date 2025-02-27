@@ -1,6 +1,6 @@
-# EUCOM LLM
+# MERET - MITRE Entity Relationship Extraction Tool
 
-EUCOM LLM is a Streamlit application designed to extract, validate, and visualize entities and relationships from PDF documents. The application leverages Azure OpenAI for natural language processing, integrates Russian NLP via Natasha, and includes several validation utilities for common data types like IP addresses, emails, phone numbers, and IBANs.
+MERET is a Streamlit application designed to extract, validate, and visualize entities and relationships from PDF documents. The application leverages Azure OpenAI for natural language processing, integrates Russian NLP via Natasha, and includes several validation utilities for common data types like IP addresses, emails, phone numbers, and IBANs.
 
 ## Features
 
@@ -26,8 +26,7 @@ EUCOM LLM is a Streamlit application designed to extract, validate, and visualiz
 - **Customizable Filtering**: Filter visualizations based on document source, relationship type, or search terms
 
 ### Export Options
-- **CSV Export**: Saves extracted entities and relationships as CSV files
-- **PDF Reports**: Generates formatted PDF reports of extracted entities
+- **CSV Export**: Exports extracted entities and relationships as CSV files
 - **Analyst Notebook Support**: Exports data in i2 Analyst's Notebook XML format for further analysis in professional intelligence tools
 - **Interactive Downloads**: Direct download buttons for all export formats
 
@@ -41,7 +40,7 @@ pip install -r requirements.txt
 
 1. Run the Streamlit application:
 ```bash
-streamlit run app2.py
+streamlit run app3.py
 ```
 
 2. Upload one or more PDF documents through the sidebar
