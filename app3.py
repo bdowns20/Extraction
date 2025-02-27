@@ -606,9 +606,15 @@ def export_to_analyst_notebook(entities, relationships, file_path="analyst_noteb
 # Main App (Streamlit)
 # ---------------------------------------
 def app():
-    st.title("MERET - MITRE Entity Relationship Extraction Tool")
-
-    # Initialize session state for storing multiple PDF data
+    # Configure page settings
+    st.set_page_config(
+        page_title="MERET - MITRE Entity Relationship Extraction Tool",
+        page_icon="🔍",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Initialize session state for storing multiple PDF data and user preferences
     if 'all_entities' not in st.session_state:
         st.session_state.all_entities = {}
     if 'all_relationships' not in st.session_state:
@@ -625,9 +631,64 @@ def app():
             "person_names": [],
             "ibans": []
         }
+    if 'dark_mode' not in st.session_state:
+        st.session_state.dark_mode = False
+        
+    # Dark mode toggle in sidebar
+    with st.sidebar:
+        st.title("Settings")
+        dark_mode = st.toggle("Dark Mode", value=st.session_state.dark_mode)
+        
+        if dark_mode != st.session_state.dark_mode:
+            st.session_state.dark_mode = dark_mode
+            st.experimental_rerun()
+    
+    # Apply custom CSS for dark mode
+    if st.session_state.dark_mode:
+        st.markdown("""
+        <style>
+        .stApp {
+            background-color: #1E1E1E;
+            color: #FFFFFF;
+        }
+        .st-bx {
+            background-color: #2D2D2D;
+        }
+        .st-bc {
+            background-color: #2D2D2D;
+        }
+        .st-bu {
+            background-color: #4F4F4F;
+        }
+        .stButton>button {
+            background-color: #4F4F4F;
+            color: white;
+        }
+        .stTextInput>div>div>input {
+            background-color: #3B3B3B;
+            color: white;
+        }
+        .stSelectbox>div>div>select {
+            background-color: #3B3B3B;
+            color: white;
+        }
+        .stExpander {
+            background-color: #2D2D2D;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+    
+    # Main title
+    st.title("MERET - MITRE Entity Relationship Extraction Tool")
 
-    # File uploader for multiple PDF files
-    uploaded_files = st.sidebar.file_uploader("Upload PDFs", type=["pdf"], accept_multiple_files=True)
+    # File uploader section
+    st.sidebar.header("Document Upload")
+    uploaded_files = st.sidebar.file_uploader(
+        "Upload PDFs", 
+        type=["pdf"], 
+        accept_multiple_files=True,
+        help="Select one or more PDF files to analyze"
+    )
     
     # Initialize OpenAI client
     openai_client = AzureOpenAI(

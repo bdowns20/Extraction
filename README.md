@@ -24,6 +24,7 @@ MERET is a Streamlit application designed to extract, validate, and visualize en
 - **Interactive Network Graphs**: Visualizes relationships using interactive graphs (via PyVis)
 - **Entity Frequency Charts**: Displays bar charts for entity frequency (via Streamlit and Matplotlib)
 - **Customizable Filtering**: Filter visualizations based on document source, relationship type, or search terms
+- **Dark Mode Support**: Toggle between light and dark themes for better visibility in different environments
 
 ### Export Options
 - **CSV Export**: Exports extracted entities and relationships as CSV files
